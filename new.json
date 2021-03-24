@@ -3,7 +3,7 @@
 "model": "accounts.Protocol",
 "pk": 3435,
 "fields": {
-"pid": "FAD810A3-2019US",
+"name": "FAD810A3-2019US",
 "title": "Curative fairy ring control with ADEPIDYN or ADEPIDYN premixes on warm or cool season greens height turfgrass."
 }
 },
@@ -11,7 +11,7 @@
 "model": "accounts.Protocol",
 "pk": 3436,
 "fields": {
-"pid": "FAD810B3-2019US",
+"name": "FAD810B3-2019US",
 "title": "Curative fairy ring control with increased difenoconazole premixes on warm or cool season greens height turfgrass."
 }
 },
@@ -19,7 +19,7 @@
 "model": "accounts.Protocol",
 "pk": 3437,
 "fields": {
-"pid": "FAD811A3-2019US",
+"name": "FAD811A3-2019US",
 "title": "Preventative fairy ring control with ADEPIDYN or  mixtures on warm or cool season greens height turfgrass."
 }
 },
@@ -27,7 +27,7 @@
 "model": "accounts.Protocol",
 "pk": 3438,
 "fields": {
-"pid": "FDI800A4-2019US",
+"name": "FDI800A4-2019US",
 "title": "Improved anthracnose (Colletotrichum cereale) control on Poa greens with increased difenoconazole rates."
 }
 },
@@ -35,7 +35,7 @@
 "model": "accounts.Protocol",
 "pk": 3439,
 "fields": {
-"pid": "FDI800B4-2019US",
+"name": "FDI800B4-2019US",
 "title": "Evaluate NMG-787 and increased difenoconazole rates for improved anthracnose (Colletotrichum cereale) control on Poa greens."
 }
 },
@@ -43,7 +43,7 @@
 "model": "accounts.Protocol",
 "pk": 3440,
 "fields": {
-"pid": "FDI801A4-2019US",
+"name": "FDI801A4-2019US",
 "title": "Improved brown patch (Rhizoctonia solani) control on creeping bentgrass greens with increased difenoconazole rates."
 }
 },
@@ -51,7 +51,7 @@
 "model": "accounts.Protocol",
 "pk": 3441,
 "fields": {
-"pid": "FDI802A4-2019US",
+"name": "FDI802A4-2019US",
 "title": "Improved dollar spot (Clarireedia spp.)  control on creeping bentgrass greens and seashore paspalum turfgrass with increased difenoconazole rates."
 }
 },
@@ -59,7 +59,7 @@
 "model": "accounts.Protocol",
 "pk": 3442,
 "fields": {
-"pid": "PTX801A4-2019US",
+"name": "PTX801A4-2019US",
 "title": "Improved turf quality on fairway height bermudagrass with trinexapac-ethyl premixes."
 }
 },
@@ -67,7 +67,7 @@
 "model": "accounts.Protocol",
 "pk": 3443,
 "fields": {
-"pid": "PTX802A4-2019US",
+"name": "PTX802A4-2019US",
 "title": "Abiotic stress tolerance and improved turf quality on cool season turfgrass greens with ASM and TXP premix programs."
 }
 },
@@ -75,7 +75,7 @@
 "model": "accounts.Protocol",
 "pk": 3444,
 "fields": {
-"pid": "PTX803A4-2019US",
+"name": "PTX803A4-2019US",
 "title": "Improved turf quality on fairway height cool season turfgrass with trinexapac-ethyl premixes."
 }
 }
