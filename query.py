@@ -4,7 +4,7 @@ from sqlalchemy import create_engine
 import pandas as pd
 import math
 from docx.shared import Cm, Inches, RGBColor, Pt
-from docx.enum.section import WD_ORIENT
+from docx.enum.section import WD_ORIENT, WD_SECTION
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.enum.style import WD_STYLE_TYPE
@@ -74,7 +74,7 @@ def get_assessments(protocol_id):
 	df['collection_basis'] = df['collection_basis'] + '/' + df['collection_unit']
 	df['reporting_basis'] = df['reporting_basis'] + '/' + df['reporting_unit']
 	df = df.drop(columns=['sample_unit','collection_unit','reporting_unit'])
-	df.columns = df.columns.str.replace('no_subsamples', '# of\nSubsamples')
+	df.columns = df.columns.str.replace('no_subsamples', '# of Sub-\nSamples')
 	df.columns = df.columns.str.replace('reporting_basis', 'Reporting\nBasis')
 	df.columns = df.columns.str.replace('collection_basis', 'Collection\nBasis')
 	df.columns = df.columns.str.replace('sample_size', 'Sample\nSize')
@@ -89,7 +89,7 @@ def get_assessments(protocol_id):
 def get_treatments(protocol_id):
 	engine = pd_connect()
 	p = protocol_id.upper()
-	df = pd.read_sql("SELECT treatments_treatmentlist_treatmentnumber as no, treatments_treatmentlist_formconcqty as conc_qty, treatments_treatmentlist_rate as rate, treatments_treatmentlist_otherrate as other_rate, treatments_treatmentlist_applcode as appl_code, treatments_treatmentlist_check_name as check_name, treatments_treatmentlist_productamountunit_code as unit, treatments_treatmentlist_treatmenttype_code as treatment_code, treatments_treatmentlist_treatmentname_code as trt_name, treatments_treatmentlist_treatmentname_name as trt_name2, treatments_treatmentlist_formconcunit_code as conc_unit, treatments_treatmentlist_formtype_code as Form_Type, treatments_treatmentlist_rateunit_code as rate_unit, treatments_treatmentlist_otherrateunit_code as otherrate_unit, treatments_treatmentlist_appltiming_armdescription as appl_timing, treatments_treatmentlist_applmethod_armdescription as appl_method, treatments_treatmentlist_applplacement_armdescription as appl_placement, treatments_treatmentlist_treatmenttype_code as trt_type, treatments_treatmentlist_minapplication as min_app FROM mio.public.mio212_trialprotocol_treatments WHERE protocol_id = \'" + p + "\';", engine)
+	df = pd.read_sql("SELECT treatments_treatmentlist_treatmentnumber as no, treatments_treatmentlist_formconcqty as conc_qty, treatments_treatmentlist_rate as rate, treatments_treatmentlist_otherrate as other_rate, treatments_treatmentlist_applcode as appl_code, treatments_treatmentlist_check_name as check_name, treatments_treatmentlist_productamountunit_code as unit, treatments_treatmentlist_treatmenttype_code as treatment_code, treatments_treatmentlist_treatmentname_code as trt_name, treatments_treatmentlist_treatmentname_name as trt_name2, treatments_treatmentlist_formconcunit_code as conc_unit, treatments_treatmentlist_formtype_code as Form_Type, treatments_treatmentlist_rateunit_code as rate_unit, treatments_treatmentlist_otherrateunit_code as otherrate_unit, treatments_treatmentlist_appltiming_armdescription as appl_timing, treatments_treatmentlist_applmethod_armdescription as appl_method, treatments_treatmentlist_applplacement_armdescription as appl_placement, treatments_treatmentlist_treatmenttype_code as trt_type, treatments_treatmentlist_minapplication as min_app, treatments_treatmentlist_productamounttotalqty as total_qty, treatments_treatmentlist_productamountunit_code as total_units FROM mio.public.mio212_trialprotocol_treatments WHERE protocol_id = \'" + p + "\';", engine)
 	df = remove_blankrows(df)
 	return df
 
@@ -98,59 +98,75 @@ def get_instructions(protocol_id):
 	engine = pd_connect()
 	p = protocol_id.upper()
 	df = pd.read_sql("SELECT instructions_instructions as instructions, instructions_confidential as design_codes, instructions_studyruleset_code as strudy_rules FROM mio.public.mio212_trialprotocol_instructions WHERE protocol_id = \'" +p+'\';', engine)
-	df = remove_blankrows(df)
-	output = {}; c = df.columns
-	for x in range(len(df.loc[0])):
-		column = []
-		for y in range(len(df)):
-			if df.iloc[y,x] == None:
-				pass
-			else:
-				column.append(df.iloc[y,x])
-		output[c[x]] = column
-	return output
+	if df.empty == True:
+		return [] 
+	elif df.empty == False:
+		df = remove_blankrows(df).reset_index()
+		df = df.drop(columns=['index'])
+		output = {}; c = df.columns
+		for x in range(len(df.loc[0])):
+			column = []
+			for y in range(len(df)):
+				if df.iloc[y,x] == None:
+					pass
+				else:
+					column.append(df.iloc[y,x])
+			output[c[x]] = column
+		return output
 	
 
 def clean_instructions(protocol_id):
 	d = get_instructions(protocol_id)
-	instructions = d['instructions'][0]
-	occurences = instructions.count('\r\n'); lines = []
-	for x in range(occurences):
-		index = instructions.index('\r\n')
-		lines.append(instructions[0:index])
-		instructions = instructions[index+2:]
-	y = 0; indexes = []; current_para = []; output = {}; current_hdr = None
-	for line in lines:
-		try:
-			index = line.index(':')
-			sub = line[:index]
-			header = True
-			for x in sub:
-				if x.isalpha() == True and x.isupper() == True:
-					header = True 
-				elif x.isalpha() == True and x.isupper() == False:
-					header = False
-					break 
-				else:
-					pass
-			if header == True:
-				indexes.append(y)
-				output[current_hdr] = current_para
-				current_hdr = line
-				current_para = []
-			else:
-				current_para.append(line)
-		except:
-			current_para.append(line)
-		y+=1
-	for x in output.keys():
-		lines = output[x]
+	if d == []:
+		return [] 
+	elif d['instructions'] == []:
+		return []
+	else:
+		instructions = d['instructions'][0]
+		occurences = instructions.count('\r\n'); lines = []
+		subjects = ['CROPS/SURFACES','CROPS','TARGETS', 'OBJECTIVE','OBJECTIVES','OBJECTIVE(S)','SPECIAL PROTOCOL TASKS','DATA REQUIREMENTS/ESSENTIAL DATA','EXPERIMENTAL DESIGN AND PLOT DIMENSIONS','EXPERIMENTAL DESIGN & PLOT DIMENSIONS','MAINTANENCE DETAILS', 'MAINTENANCE DETAILS','TREATMENT DETAILS', 'ASSESSMENT TIMING SUMMARY','ASSESSMENT DETAILS','DATA REPORTING DEADLINES','OTHER NOTES','CROP DESTRUCT','DATA REPORTING GUIDELINES','SAFETY AND STEWARDSHIP OF TEST SUBSTANCES IN THIS PROTOCOL','CONTRACT RESEARCH ORGANIZATIONS','CONTRACT RESEARCH ORGANIZATIONS (NOT UNIVERSITIES)', 'CROP DESTRUCT','UNIVERSITIES','DESIGN CODES']
+		for x in range(occurences):
+			index = instructions.index('\r\n')
+			lines.append(instructions[0:index+2])
+			instructions = instructions[index+2:]
+		y = 0; indexes = []; current_para = []; output = {}; current_hdr = None
 		for line in lines:
-			if line == ' ':
-				lines.remove(line)
-			else:
-				line = line.strip('\r\n')
-	return lines, indexes, output
+			try:
+				index = line.index(':')
+				sub = line[:index]
+				header = True
+				for x in sub:
+					if x.isalpha() == True and x.isupper() == True:
+						header = True 
+					elif x.isalpha() == True and x.isupper() == False:
+						header = False
+						break 
+					else:
+						pass
+				if header == True and sub in subjects:
+					indexes.append(y)
+					output[current_hdr] = current_para
+					current_hdr = line
+					current_para = []
+				else:
+					current_para.append(line)
+			except:
+				if line.strip('\r\n').strip() in subjects:
+					indexes.append(y)
+					output[current_hdr] = current_para
+					current_hdr = line
+					current_para = []
+				else:
+					current_para.append(line)
+			y+=1
+		print(output)
+		output.pop(None)
+		for x in output.keys():
+			lines = output[x]
+			for line in lines:
+				if line == ' \r\n':
+					lines.remove(line)
+		return lines, indexes, output
 
 
 def get_overview(protocol_id):
@@ -187,7 +203,10 @@ def condense_pdoverview(df, df2):
 		output['crop'][x] = c
 	output.pop('crop_code')
 	output.pop('target_code')
-	output['title'] = df2.iloc[0,0]
+	if df2.empty == False:
+		output['title'] = df2.iloc[0,0]
+	else:
+		output['title'] = ' '
 	return output
 
 
@@ -209,21 +228,24 @@ def remove_blankrows(df):
 def clean_trtdf(protocol_id):
 	df = get_treatments(protocol_id)
 	df = remove_blankrows(df)
+	df.columns = df.columns.str.replace('trt_name','Treatment Name')
+	df2 = df[['Treatment Name','total_qty','total_units','Treatment Name2']]
 	df = df.fillna(' ')
 	df = df.applymap(str)
-	df['Formulation'] = df['conc_qty'] + '   ' + df['conc_unit']
-	df['Rate'] = df['rate'] + '   ' + df['rate_unit']
-	df['Other Rate'] = df['other_rate'] + '   ' + df['otherrate_unit']
-	df = df.drop(columns=['conc_qty','conc_unit','rate','rate_unit','otherrate_unit','other_rate'])
-	df = df[['no','trt_type','trt_name','Formulation','form_type','Rate','Other Rate','min_app','appl_code']]
 	for x in range(len(df)):
 		df.iloc[x,0] = str(int(float(df.iloc[x,0])))
 	df.columns = df.columns.str.replace('no','No.')
-	df.columns = df.columns.str.replace('trt_type','Type')
-	df.columns = df.columns.str.replace('trt_name','Treatment Name')
+	df = df.drop(columns=['trt_type'])
 	df.columns = df.columns.str.replace('appl_code','Code')
 	df.columns = df.columns.str.replace('form_type', 'Type')
 	df.columns = df.columns.str.replace('min_app', 'Min #\nAppl')
+	df.columns = df.columns.str.replace('other_rate','Other\nRate')
+	df.columns = df.columns.str.replace('otherrate_unit', 'Other Rate\nUnit')
+	df.columns = df.columns.str.replace('rate', 'Rate')
+	df.columns = df.columns.str.replace('Rate_unit','Rate\nUnit')
+	df.columns = df.columns.str.replace('conc_unit', 'Form.\nUnit')
+	df.columns = df.columns.str.replace('conc_qty', 'Formulation')
+	df = df[['No.','Treatment Name', 'Formulation', 'Form.\nUnit', 'Type', 'Rate','Rate\nUnit','Other\nRate','Other Rate\nUnit','Min #\nAppl','Code']]
 	remove = []
 	for column in df.columns:
 		blank = True
@@ -234,23 +256,46 @@ def clean_trtdf(protocol_id):
 		if blank == True:
 			remove.append(column)
 	df = df.drop(columns=remove)
-	return df
+	df2 = df2.dropna(subset=['total_qty'])
+	unique = df2['Treatment Name'].unique(); d = {}
+	for x in unique:
+		d[x] = [0,None,None]
+	for x in df2.iterrows():
+		d[x[1][0]][0] += round(float(x[1][1]),2)
+		d[x[1][0]][1] = x[1][2]
+		d[x[1][0]][2] = x[1][3]
+	return df, d
 
 
-def print(protocol_id):
-	print_doc(protocol_id, 'Cambria', 12, True)
+def printer(protocol_id):
+	print_doc(protocol_id, 'Arial', 12, True, False)
 
 
-def print_doc(protocol_id, font, font_size, confidential):
-	df = clean_trtdf(protocol_id)
+def print_doc(protocol_id, font, font_size, confidential, color):
+	df, totals = clean_trtdf(protocol_id)
 	df2, df3 = pd_overview(protocol_id)
-	overview = condense_pdoverview(df2,df3)
+	if df2.empty == False:
+		overview = condense_pdoverview(df2,df3)
+	else:
+		overview = []
 	assessments = get_assessments(protocol_id)
+	instructions = clean_instructions(protocol_id)
 	d = Document()
-	add_cover(d, protocol_id, overview, confidential, font, font_size)
-	add_assessments(d, protocol_id, assessments, font, font_size)
-	add_instructions(d, protocol_id)
-	add_trttable(d, protocol_id, df, font, font_size)
+	if overview != []:
+		add_cover(d, protocol_id, overview, confidential, font, font_size)
+	if instructions != []:
+		instructions = instructions[2]
+		add_instructions(d, instructions, protocol_id,font_size,font)
+	d.add_section(WD_SECTION.NEW_PAGE)
+	if assessments.empty == False:
+		add_assessments(d, protocol_id, assessments, font, font_size, color)
+		d.add_page_break()
+	if totals != {}:
+		add_totals(d, totals, font, font_size, confidential, color)
+		d.add_page_break()
+	if df.empty == False: 
+		add_trttable(d, protocol_id, df, font, font_size, color)
+	d.save(overview['shortname'][0] + '.docx')
 
 
 def add_cover(document, protocol_id, d, confidential, font_type, font_size):
@@ -284,7 +329,7 @@ def add_cover(document, protocol_id, d, confidential, font_type, font_size):
 	table1.rows[1].cells[1].text = final
 	table1.rows[1].cells[0].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
 	table1.rows[1].cells[1].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
-
+	"""
 	document.add_page_break()
 	overview = document.add_paragraph()
 	overview.add_run('Crop(s):  ').font.bold = True
@@ -294,7 +339,7 @@ def add_cover(document, protocol_id, d, confidential, font_type, font_size):
 	overview.add_run('\r\nObjective(s): ').font.bold = True
 	objectives = document.add_paragraph(d['objective'][0])
 	objectives.paragraph_format.left_indent = Inches(0.5)
-	
+	"""
 	document.add_page_break()
 	header = document.sections[0].header.paragraphs[0]
 	run = header.add_run()
@@ -314,15 +359,24 @@ def add_cover(document, protocol_id, d, confidential, font_type, font_size):
 	header.style = document.styles['Header']
 	footer.style = document.styles['Footer']
 	run.alignment = WD_ALIGN_PARAGRAPH.LEFT
-	add_page_number(document.sections[0].header.paragraphs[0])
-	document.save(protocol_id + '.docx')
+	add_page_number(document.sections[0].footer.paragraphs[0])
 
 
-def add_assessments(document, protocol_id, df, font_type, font_size):
+def add_assessments(document, protocol_id, df, font_type, font_size, color):
+	title = document.add_paragraph()
+	title_run = title.add_run('Assessments')
+	title_run.font.bold = True
+	title_run.font.size = Pt(font_size + 2)
+	title_run.font.underline = True
+	title.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.CENTER
 	cols = df.columns
 	table = document.add_table(rows=1, cols=len(cols))
 	table.allow_autofit = True; table.alignment = WD_TABLE_ALIGNMENT.CENTER;
-	style = document.styles.add_style('table', WD_STYLE_TYPE.PARAGRAPH); font = style.font; font.name = font_type; font.size = Pt(font_size); font.bold = False
+	if font_type == 'Arial':
+		font_type2 = 'Arial Narrow'
+	else:
+		font_type2 = font_type
+	style = document.styles.add_style('table', WD_STYLE_TYPE.PARAGRAPH); font = style.font; font.name = font_type2; font.size = Pt(font_size); font.bold = False
 	style2 = document.styles.add_style('table_header', WD_STYLE_TYPE.PARAGRAPH); font = style2.font; font.name = font_type; font.size = Pt(font_size); font.bold = True; font.color.rgb = RGBColor(255,255,255)
 	hdr_cells = table.rows[0].cells; y = 0
 	for x in cols:
@@ -342,13 +396,17 @@ def add_assessments(document, protocol_id, df, font_type, font_size):
 			row_cells[i].text = str(row[i])
 			p = row_cells[i].paragraphs[0]
 			p.style = document.styles['table']
-			set_cell_border(row_cells[i],start={"sz": 3, "val": "single", "color": "#5b6775", "space": "0"})
-			set_cell_border(row_cells[i], top={"sz": 3, "val": "single", "color": "#FF0000", "space": "0"})
+			set_cell_border(row_cells[i],start={"sz": 1, "val": "single", "color": "#5b6775", "space": "0"})
 			if y % 2 == 1:
-				shading_elm_1 = parse_xml(r'<w:shd {} w:fill="b5d4ff"/>'.format(nsdecls('w')))
+				if color == True:
+					shading_elm_1 = parse_xml(r'<w:shd {} w:fill="b5d4ff"/>'.format(nsdecls('w')))
+				else:
+					shading_elm_1 = parse_xml(r'<w:shd {} w:fill="c9c9c9"/>'.format(nsdecls('w')))
 				row_cells[i]._tc.get_or_add_tcPr().append(shading_elm_1)
 			if index == len(df):
-				set_cell_border(row_cells[i], bottom={"sz": 3, "val": "single", "color": "#5b6775", "space": "0"})
+				set_cell_border(row_cells[i], bottom={"sz": 1, "val": "single", "color": "#5b6775", "space": "0"})
+			if i == len(cols)-1:
+				set_cell_border(row_cells[i], end={"sz": 1, "val": "single", "color": "#5b6775", "space": "0"})
 		y += 1
 		index += 1
 	for column in table.columns:
@@ -359,7 +417,13 @@ def add_assessments(document, protocol_id, df, font_type, font_size):
 		    tcW.type = 'auto'
 
 
-def add_trttable(document, protocol_id, df, table_font, font_size):
+def add_trttable(document, protocol_id, df, table_font, font_size, color):
+	title = document.add_paragraph()
+	title_run = title.add_run('Treatments')
+	title_run.font.bold = True
+	title_run.font.size = Pt(font_size + 2)
+	title_run.font.underline = True
+	title.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.CENTER
 	cols = df.columns
 	table = document.add_table(rows=1,cols=len(cols))
 	table.allow_autofit = True
@@ -378,11 +442,14 @@ def add_trttable(document, protocol_id, df, table_font, font_size):
 		border_row = False
 		row = x[1]
 		row_cells = table.add_row().cells
-		for i in range(len(cols)):
+		last = False
+		if y == len(df)-1:
+			last = True
+		for i in range(len(cols)): 
 			row_cells[i].text = str(row[i])
 			p = row_cells[i].paragraphs[0]
 			p.style = document.styles['table']
-			set_cell_border(row_cells[i],start={"sz": 3, "val": "single", "color": "#5b6775", "space": "0"})
+			set_cell_border(row_cells[i],start={"sz": 1, "val": "single", "color": "#5b6775", "space": "0"},)
 			if i == 0:
 				if int(row[i]) > current:
 					current = int(row[i])
@@ -391,11 +458,18 @@ def add_trttable(document, protocol_id, df, table_font, font_size):
 						shaded = True
 					elif shaded == True:
 						shaded = False
+			elif i == len(cols)-1:
+				set_cell_border(row_cells[i],end={"sz": 1, "val": "single", "color": "#5b6775", "space": "0"})
 			if border_row == True:
-				set_cell_border(row_cells[i], top={"sz": 3, "val": "single", "color": "#FF0000", "space": "0"})
+				set_cell_border(row_cells[i], top={"sz": 1, "val": "single", "color": "#5b6775", "space": "0"})
 			if shaded == True:
-				shading_elm_1 = parse_xml(r'<w:shd {} w:fill="b5d4ff"/>'.format(nsdecls('w')))
+				if color == True:
+					shading_elm_1 = parse_xml(r'<w:shd {} w:fill="b5d4ff"/>'.format(nsdecls('w')))
+				else:
+					shading_elm_1 = parse_xml(r'<w:shd {} w:fill="c9c9c9"/>'.format(nsdecls('w')))
 				row_cells[i]._tc.get_or_add_tcPr().append(shading_elm_1)
+			if last == True:
+				set_cell_border(row_cells[i],bottom={"sz": 1, "val": "single", "color": "#5b6775", "space": "0"})
 		y += 1
 	for column in table.columns:
 		for cell in column.cells:
@@ -411,29 +485,161 @@ def add_trttable(document, protocol_id, df, table_font, font_size):
 	section.page_height = new_height
 	section.left_margin = Inches(0.5)
 	section.right_margin = Inches(0.5)
-	document.save(protocol_id + '.docx')
+	section.top_margin = Inches(0.5)
+	section.bottom_margin = Inches(0.5)
+	section.header_distance = Inches(0.35)
+	section.footer_distance = Inches(0.35)
 
 
-def add_instructions(document, protocol_id):
-	d = clean_instructions(protocol_id)[2]
+def add_totals(document, d, font, font_size, confidential, color):
+	"""Removes confidential trt_name info and makes table"""
+	title = document.add_paragraph()
+	title_run = title.add_run('Product Totals')
+	title_run.font.bold = True
+	title_run.font.size = Pt(font_size + 2)
+	title_run.font.underline = True
+	title.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.CENTER
+	if confidential == False:
+		data = {}
+		for x in d.keys():
+			data[x] = d[x][0:2]
+		table = document.add_table(rows=1,cols=3)
+		table.allow_autofit = True; table.alignment = WD_TABLE_ALIGNMENT.CENTER;
+		hdr_cells = table.rows[0].cells; headers = ['Treatment Name','Product\nTotal','Unit']
+		for x in range(3):
+			hdr_cells[x].text = headers[x]
+			p = hdr_cells[x].paragraphs[0]
+			p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+			p.style = document.styles['table_header']
+			shading_elm_1 = parse_xml(r'<w:shd {} w:fill="5b6775"/>'.format(nsdecls('w')))
+			hdr_cells[x]._tc.get_or_add_tcPr().append(shading_elm_1)
+			set_cell_border(hdr_cells[x], end={"sz": 1, "val": "single", "color": "#ffffff", "space": "0"},start={"sz": 1, "val": "single", "color": "#ffffff", "space": "0"})
+		y = 0
+		for x in data.keys():
+			row_cells = table.add_row().cells
+			row_cells[0].text = x
+			row_cells[1].text = str(round(data[x][0],2))
+			row_cells[2].text = data[x][1]
+			for i in range(3):
+				p = row_cells[i].paragraphs[0]
+				p.style = document.styles['table']
+				set_cell_border(row_cells[i],start={"sz": 1, "val": "single", "color": "#5b6775", "space": "0"},end={"sz": 1, "val": "single", "color": "#5b6775", "space": "0"})
+				if y % 2 == 1:
+					if color == True:
+						shading_elm_1 = parse_xml(r'<w:shd {} w:fill="b5d4ff"/>'.format(nsdecls('w')))
+					else:
+						shading_elm_1 = parse_xml(r'<w:shd {} w:fill="c9c9c9"/>'.format(nsdecls('w')))
+					row_cells[i]._tc.get_or_add_tcPr().append(shading_elm_1)
+			y+=1
+		for column in table.columns:
+			for cell in column.cells:
+			    tc = cell._tc
+			    tcPr = tc.get_or_add_tcPr()
+			    tcW = tcPr.get_or_add_tcW()
+			    tcW.type = 'auto'
+	else:
+		data ={}
+		for x in d.keys():
+			data[x] = d[x]
+		table = document.add_table(rows=1,cols=4)
+		table.allow_autofit = True; table.alignment = WD_TABLE_ALIGNMENT.CENTER;
+		hdr_cells = table.rows[0].cells; headers = ['Treatment Name','Alternate','Product\nTotal','Unit']
+		for x in range(4):
+			hdr_cells[x].text = headers[x]
+			p = hdr_cells[x].paragraphs[0]
+			p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+			p.style = document.styles['table_header']
+			shading_elm_1 = parse_xml(r'<w:shd {} w:fill="5b6775"/>'.format(nsdecls('w')))
+			hdr_cells[x]._tc.get_or_add_tcPr().append(shading_elm_1)
+			set_cell_border(hdr_cells[x], end={"sz": 1, "val": "single", "color": "#ffffff", "space": "0"},start={"sz": 1, "val": "single", "color": "#ffffff", "space": "0"})
+		y = 0
+		for x in data.keys():
+			row_cells = table.add_row().cells
+			row_cells[0].text = x
+			row_cells[1].text = data[x][2]
+			row_cells[2].text = str(round(data[x][0],2))
+			row_cells[3].text = data[x][1]
+			for i in range(4):
+				p = row_cells[i].paragraphs[0]
+				p.style = document.styles['table']
+				set_cell_border(row_cells[i],start={"sz": 1, "val": "single", "color": "#5b6775", "space": "0"},end={"sz": 1, "val": "single", "color": "#5b6775", "space": "0"})
+				if y % 2 == 1:
+					if color == True:
+						shading_elm_1 = parse_xml(r'<w:shd {} w:fill="b5d4ff"/>'.format(nsdecls('w')))
+					else:
+						shading_elm_1 = parse_xml(r'<w:shd {} w:fill="c9c9c9"/>'.format(nsdecls('w')))
+					row_cells[i]._tc.get_or_add_tcPr().append(shading_elm_1)
+			y+=1
+		for column in table.columns:
+			for cell in column.cells:
+			    tc = cell._tc
+			    tcPr = tc.get_or_add_tcPr()
+			    tcW = tcPr.get_or_add_tcW()
+			    tcW.type = 'auto'
+
+def add_instructions(document, instructions, protocol_id,font_size, font):
+	d = instructions
 	for header in d.keys():
 		p = document.add_paragraph()
 		p.paragraph_format.keep_with_next = True
-		hdr = p.add_run(header)
+		try:
+			index = header.index(':')
+			f = header[:index]
+			s = header[index:]
+			hdr = p.add_run(f)
+			hdr2 = p.add_run(s.strip('\r\n'))
+		except:
+			hdr = p.add_run(header.strip('\r\n') + ':')
 		content = document.add_paragraph()
-		content.paragraph_format.keep_together = True
+		content.paragraph_format.keep_together = True; y = 1;
 		for x in d[header]:
-			content_run = content.add_run(x)
-			content_run.font.size = Pt(12)
-			content_run.font.bold = False
-		content.paragraph_format.left_indent = Inches(0.5)
-		content.paragraph_format.space_after = Pt(6)
-		hdr.font.size = Pt(12)
+			if y != len(d[header]):
+				try:
+					index = x[:50].index(':')
+					bold = x[:index]
+					sub = x[index:]
+					bold_run = content.add_run(bold)
+					sub_run = content.add_run(sub)
+					bold_run.font.bold = True
+					sub_run.font.bold = False
+					bold_run.font.size = Pt(font_size)
+					sub_run.font.size = Pt(font_size)
+				except:
+					content_run = content.add_run(x)
+					content_run.font.size = Pt(font_size)
+					content_run.font.bold = False
+			else:
+				try:
+					index = x[:50].index(':')
+					bold = x[:index]
+					sub = x[index:]
+					bold_run = content.add_run(bold)
+					sub_run = content.add_run(sub.strip('\r\n'))
+					bold_run.font.bold = True
+					sub_run.font.bold = False
+					bold_run.font.size = Pt(font_size)
+					sub_run.font.size = Pt(font_size)
+				except:
+					content_run = content.add_run(x.strip('\r\n'))
+					content_run.font.size = Pt(font_size)
+					content_run.font.bold = False
+			y += 1
+		content.paragraph_format.left_indent = Inches(0.15)
+		content.paragraph_format.space_after = Pt(10)
+		content.paragraph_format.line_spacing = 1
+		hdr.font.size = Pt(font_size + 2)
 		hdr.font.underline = True
 		hdr.font.bold = True
 		p.paragraph_format.space_after = Pt(6)
+	section = document.sections[-1]
+	section.left_margin = Inches(0.35)
+	section.right_margin = Inches(0.35)
+	section.top_margin = Inches(0.5)
+	section.bottom_margin = Inches(0.5)
+	section.header_distance = Inches(0.35)
+	section.footer_distance = Inches(0.35)
 	document.add_page_break()
-	document.save(protocol_id + '.docx')
+
 
 
 def set_cell_border(cell: _Cell, **kwargs):
@@ -484,7 +690,7 @@ def create_attribute(element, name, value):
 
 def add_page_number(paragraph):
 
-    page_run = paragraph.add_run('\t\t\t\t\t\t\t')
+    page_run = paragraph.add_run('    ')
     t1 = create_element('w:t')
     create_attribute(t1, 'xml:space', 'preserve')
     t1.text = 'Page '
@@ -526,6 +732,8 @@ def add_page_number(paragraph):
     num_pages_run._r.append(fldChar3)
     num_pages_run._r.append(instrText2)
     num_pages_run._r.append(fldChar4)
+
+	
 
 """
 treatments_trialdesign_treatedplotaream2 as plotarea, treatments_applicationlist_code as app_code, treatments_trialdesign_statisticaldesign_armdescription as stat_design, treatments_applicationlist_volumemin as app_minvolume, treatments_applicationlist_volumemax as app_maxvolume, treatments_applicationlist_volumeunit_code as app_unit, treatments_applicationlist_requiredmixsize as req_mixsize, treatments_applicationlist_percentageoverage as percentoverage, treatments_applicationlist_mixsizeunit_code as mixsize_unit, treatments_treatmentlist_productamounttotalqty as product_total, treatments_trialdesign_numberofreplicates as replicates 
