@@ -295,7 +295,10 @@ def print_doc(protocol_id, font, font_size, confidential, color):
 		d.add_page_break()
 	if df.empty == False: 
 		add_trttable(d, protocol_id, df, font, font_size, color)
-	d.save(overview['shortname'][0] + '.docx')
+	if overview != []:
+		d.save(overview['shortname'][0] + '.docx')
+	else:
+		d.save(protocol_id + '.docx')
 
 
 def add_cover(document, protocol_id, d, confidential, font_type, font_size):
