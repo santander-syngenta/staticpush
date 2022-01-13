@@ -1,7 +1,5 @@
 from __future__ import print_function
 import time
-import cloudmersive_convert_api_client
-from cloudmersive_convert_api_client.rest import ApiException
 from pprint import pprint
 import psycopg2
 import numpy as np
@@ -20,11 +18,11 @@ from docx.oxml import OxmlElement, ns
 from docx.oxml.ns import qn
 from docx.oxml.ns import nsdecls
 from docx.oxml import parse_xml
-from htmldocx import HtmlToDocx
 import pyodbc
 from win32com import client
 import win32com
 import re, datetime
+from .models import fpc as FPC, manager, owner, contributor, reviewer, protocol
 
 
 host = 'deawirbitt001.clwtglrkcnfi.eu-central-1.redshift.amazonaws.com'
@@ -87,12 +85,119 @@ def clean_bd(protocol_id):
 
 def data_lake_sync():
 	engine = pd_connect()
-	df = pd.read_sql("SELECT shortname, overview_setup_trialstartyear, overview_users_ownedby_firstname + ' ' + overview_users_ownedby_lastname as owner, listagg(overview_users_contributors_firstname + ' ' + overview_users_contributors_lastname) as contributors, listagg(overview_users_reviewers_firstname + ' ' + overview_users_reviewers_lastname, ', ') as reviewers FROM mio.public.mio212_trialprotocol_overview WHERE overview_setup_country_code = 'US' GROUP BY shortname, overview_setup_trialstartyear, overview_users_ownedby_firstname, overview_users_ownedby_lastname", engine)
-	df2 = pd.read_sql("SELECT derivedpotocolshortname as shortname, balancing_fpc_firstname + ' ' + balancing_fpc_lastname as fpc, listagg(balancing_responsibletrialmanager_firstname + ' ' + balancing_responsibletrialmanager_lastname, ', ') as tr_mgr FROM (SELECT DISTINCT balancing_territory_name, derivedpotocolshortname, balancing_fpc_lastname, balancing_fpc_firstname, balancing_responsibletrialmanager_firstname, balancing_responsibletrialmanager_lastname FROM mio.public.mio189_biobalance_fact) WHERE balancing_territory_name = 'USA' GROUP BY derivedpotocolshortname, balancing_fpc_firstname, balancing_fpc_lastname", engine)
-	df = df.dropna(axis = 0, how = 'any', subset = ['shortname'])
-	df2 = df2.dropna(axis = 0, how = 'any', subset = ['shortname'])	
-	output = pd.merge(df, df2, how='inner', on=['shortname']).to_dict(orient='records')
+	print('Connecting to the Data Lake...')
+	df = pd.read_sql("SELECT shortname, protocol_id, overview_setup_trialstartyear, status, (overview_users_ownedby_firstname + ' ' + overview_users_ownedby_lastname) as owner, listagg(DISTINCT overview_users_contributors_firstname + ' ' + overview_users_contributors_lastname, ', ') as contributors, listagg(DISTINCT overview_users_reviewers_firstname + ' ' + overview_users_reviewers_lastname, ', ') as reviewers FROM mio.public.mio212_trialprotocol_fact WHERE overview_setup_country_code = 'US' GROUP BY shortname, protocol_id, overview_setup_trialstartyear, status, overview_users_ownedby_firstname, overview_users_ownedby_lastname", engine)
+	df2 = pd.read_sql("SELECT derivedpotocolshortname as shortname, listagg(DISTINCT balancing_fpc_firstname + ' ' + balancing_fpc_lastname, ', ') as fpc, listagg(DISTINCT balancing_responsibletrialmanager_firstname + ' ' + balancing_responsibletrialmanager_lastname, ', ') as tr_mgr FROM (SELECT DISTINCT balancing_territory_name, derivedpotocolshortname, balancing_fpc_lastname, balancing_fpc_firstname, balancing_responsibletrialmanager_firstname, balancing_responsibletrialmanager_lastname FROM mio.public.mio189_biobalance_fact) WHERE balancing_territory_name = 'USA' GROUP BY derivedpotocolshortname", engine)
+	df = df.dropna(axis = 0, how = 'any', subset = ['shortname','protocol_id'])
+	df2 = df2.dropna(axis = 0, how = 'any', subset = ['shortname'])
+	output = pd.merge(df, df2, how='left', on=['shortname'])
+	output.index = output['shortname']
+	output = output.drop(columns=['shortname']).to_dict(orient='index')
+	print('Data pulled from Data Lake successfully. Now Comparing to the protocol site data')
+	for y in output.keys():
+		try:
+			protocol.objects.get(shortname = y)
+			pass
+		except:
+			d = check_users(output[y])
+			print('Adding protocol: ' , y)
+			p = protocol()
+			p.shortname = y
+			p.protocol_id = d['pid']
+			p.year = output[y]['overview_setup_trialstartyear']
+			p.status = output[y]['status']
+			p.save()
+			if d['reviewers'] != []:
+				r = reviewer.objects.filter(id__in=d['reviewers'])
+				for x in r:
+					p.reviewer.add(x)
+			if d['contribs'] != [] :
+				c = contributor.objects.filter(id__in=d['contribs'])
+				for x in c:
+					p.contributor.add(x)
+			if d['owners'] != []:
+				o = owner.objects.filter(id__in=d['owners'])
+				for x in o:
+					p.owner.add(x)
+			if d['fpc'] != []:
+				f = FPC.objects.filter(id__in=d['fpc'])
+				for x in f:
+					p.fpc.add(x)
+			if d['mgrs'] != []:
+				m = manager.objects.filter(id__in=d['mgrs'])
+				for x in m:
+					p.tr_mgr.add(x)
+			p.save()
+	print('Sync Successful')
 	return output
+
+
+def check_users(protocol_object):
+	fpcs = protocol_object['fpc']; fpc_indexes = []
+	print(protocol_object)
+	if fpcs != None and type(fpcs) == str:
+		for f in fpcs.split(', '):
+			fpc_present = list(FPC.objects.filter(name=f))
+			if fpc_present == []:
+				print('Adding FPC: ', f)
+				f_obj = FPC()
+				f_obj.name = f
+				f_obj.save()
+				fpc_indexes.append(f_obj.id)
+			else:
+				fpc_indexes.append(fpc_present[0].id)
+	tr_mgrs = protocol_object['tr_mgr']; mgr_indexes = []
+	if tr_mgrs != None and type(tr_mgrs) == str:
+		for t in tr_mgrs.split(', '):
+			mgr_present = list(manager.objects.filter(name=t))
+			if mgr_present == []:
+				print('Adding manager: ', t)
+				f_obj = manager()
+				f_obj.name = t
+				f_obj.save()
+				mgr_indexes.append(f_obj.id)
+			else:
+				mgr_indexes.append(mgr_present[0].id)
+	owners = protocol_object['owner']; owner_indexes = []
+	if owners != None and type(owners) == str:
+		for o in owners.split(', '):
+			owner_present = list(owner.objects.filter(name=o))
+			if owner_present == []:
+				print('Adding Owner: ', o)
+				f_obj = owner()
+				f_obj.name = o
+				f_obj.save()
+				owner_indexes.append(f_obj.id)
+			else:
+				owner_indexes.append(owner_present[0].id)
+	contribs = protocol_object['contributors']; contrib_indexes = []
+	if contribs != None and type(contribs) == str:
+		contribs = contribs.split(', ')
+		for c in contribs:
+			contrib_present = list(contributor.objects.filter(name=c))
+			if contrib_present == []:
+				print('Adding Contrib: ', c)
+				f_obj = contributor()
+				f_obj.name = c
+				f_obj.save()
+				contrib_indexes.append(f_obj.id)
+			else:
+				contrib_indexes.append(contrib_present[0].id)
+	reviewers = protocol_object['reviewers']; reviewer_indexes = []
+	if reviewers != None and type(reviewers) == str:
+		for r in reviewers.split(', '):
+			reviewer_present = list(reviewer.objects.filter(name=r))
+			if reviewer_present == []:
+				print('Adding Reviewer: ', r)
+				f_obj = reviewer()
+				f_obj.name = r
+				f_obj.save()
+				reviewer_indexes.append(f_obj.id)
+			else:
+				reviewer_indexes.append(reviewer_present[0].id)
+	d = {'fpc':fpc_indexes,'mgrs':mgr_indexes,'owners':owner_indexes,'contribs':contrib_indexes, 'reviewers':reviewer_indexes, 'pid':protocol_object['protocol_id']}
+	return d
+
 
 def pd_overview(protocol_id):
 	"""Returns a DataFrame with the relevant fields from the overview table. Runs slower but retains table's column headers."""
@@ -150,7 +255,7 @@ def get_assessments(protocol_id):
 def get_treatments(protocol_id):
 	engine = pd_connect()
 	p = protocol_id.upper()
-	df = pd.read_sql("SELECT treatments_treatmentlist_treatmentnumber as no, treatments_treatmentlist_formconcqty as conc_qty, treatments_treatmentlist_rate as rate, treatments_treatmentlist_otherrate as other_rate, treatments_treatmentlist_applcode as appl_code, treatments_treatmentlist_check_name as check_name, treatments_treatmentlist_productamountunit_code as unit, treatments_treatmentlist_treatmenttype_code as treatment_code, treatments_treatmentlist_treatmentname_code as trt_name, treatments_treatmentlist_treatmentname_name as trt_name2, treatments_treatmentlist_formconcunit_code as conc_unit, treatments_treatmentlist_formtype_code as Form_Type, treatments_treatmentlist_rateunit_code as rate_unit, treatments_treatmentlist_otherrateunit_code as otherrate_unit, treatments_treatmentlist_appltiming_armdescription as appl_timing, treatments_treatmentlist_applmethod_armdescription as appl_method, treatments_treatmentlist_applplacement_armdescription as appl_placement, treatments_treatmentlist_treatmenttype_code as trt_type, treatments_treatmentlist_minapplication as min_app, treatments_treatmentlist_productamounttotalqty as total_qty, treatments_treatmentlist_productamountunit_code as total_units, treatments_treatmentlist_treatmentname_armdescription as prod_description, treatments_treatmentlist_applplacement_name as placement, treatments_treatmentlist_appltiming_name as timing, treatments_treatmentlist_applmethod_name as method, treatments_treatmentlist_lotcode as lotcode FROM mio.public.mio212_trialprotocol_treatments WHERE protocol_id = \'" + p + "\';", engine)
+	df = pd.read_sql("SELECT treatments_treatmentlist_treatmentnumber as no, treatments_treatmentlist_treatementseq as seq_no, treatments_treatmentlist_treatementtag as trttag, treatments_treatmentlist_formconcqty as conc_qty, treatments_treatmentlist_rate as rate, treatments_treatmentlist_otherrate as other_rate, treatments_treatmentlist_applcode as appl_code, treatments_treatmentlist_check_name as check_name, treatments_treatmentlist_productamountunit_code as unit, treatments_treatmentlist_treatmenttype_code as treatment_code, treatments_treatmentlist_treatmentname_code as trt_name, treatments_treatmentlist_treatmentname_name as trt_name2, treatments_treatmentlist_formconcunit_code as conc_unit, treatments_treatmentlist_formtype_code as Form_Type, treatments_treatmentlist_rateunit_code as rate_unit, treatments_treatmentlist_otherrateunit_code as otherrate_unit, treatments_treatmentlist_appltiming_armdescription as appl_timing, treatments_treatmentlist_applmethod_armdescription as appl_method, treatments_treatmentlist_applplacement_armdescription as appl_placement, treatments_treatmentlist_treatmenttype_code as trt_type, treatments_treatmentlist_minapplication as min_app, treatments_treatmentlist_productamounttotalqty as total_qty, treatments_treatmentlist_productamountunit_code as total_units, treatments_treatmentlist_treatmentname_name as prod_description, treatments_treatmentlist_applplacement_armcode as placement, treatments_treatmentlist_appltiming_armcode as timing, treatments_treatmentlist_applmethod_armcode as method, treatments_treatmentlist_lotcode as lotcode FROM mio.public.mio212_trialprotocol_treatments WHERE protocol_id = \'" + p + "\';", engine)
 	df = remove_blankrows(df)
 	return df
 
@@ -185,7 +290,7 @@ def clean_instructions(protocol_id):
 	else:
 		instructions = d['instructions'][0]
 		occurences = instructions.count('\r\n'); lines = []
-		subjects = ['CROPS/SURFACES','CROPS','TARGETS', 'OBJECTIVE','OBJECTIVES','OBJECTIVE(S)','SPECIAL PROTOCOL TASKS','DATA REQUIREMENTS/ESSENTIAL DATA','DATA REQUIEMENTS/ESSENTIAL DATA','EXPERIMENTAL DESIGN AND PLOT DIMENSIONS','EXPERIMENTAL DESIGN & PLOT DIMENSIONS','MAINTANENCE DETAILS', 'MAINTENANCE DETAILS','TREATMENT DETAILS', 'ASSESSMENT TIMING SUMMARY','ASSESSMENT DETAILS','DATA REPORTING DEADLINES','OTHER NOTES','CROP DESTRUCT','DATA REPORTING GUIDELINES','SAFETY AND STEWARDSHIP OF TEST SUBSTANCES IN THIS PROTOCOL','CONTRACT RESEARCH ORGANIZATIONS','CONTRACT RESEARCH ORGANIZATIONS (NOT UNIVERSITIES)', 'CROP DESTRUCT','UNIVERSITIES','DESIGN CODES']
+		subjects = ['CROPS/SURFACES','CROPS', ' CROPS', 'TARGETS', 'OBJECTIVE','OBJECTIVES','OBJECTIVE(S)','SPECIAL PROTOCOL TASKS','DATA REQUIREMENTS/ESSENTIAL DATA','DATA REQUIEMENTS/ESSENTIAL DATA','EXPERIMENTAL DESIGN AND PLOT DIMENSIONS','EXPERIMENTAL DESIGN & PLOT DIMENSIONS','MAINTANENCE DETAILS', 'MAINTENANCE DETAILS','TREATMENT DETAILS', 'ASSESSMENT TIMING SUMMARY','ASSESSMENT DETAILS','DATA REPORTING DEADLINES','OTHER NOTES','CROP DESTRUCT','DATA REPORTING GUIDELINES','SAFETY AND STEWARDSHIP OF TEST SUBSTANCES IN THIS PROTOCOL','CONTRACT RESEARCH ORGANIZATIONS','CONTRACT RESEARCH ORGANIZATIONS (NOT UNIVERSITIES)', 'CROP DESTRUCT','UNIVERSITIES','DESIGN CODES']
 		for x in range(occurences):
 			index = instructions.index('\r\n')
 			lines.append(instructions[0:index+2])
@@ -224,11 +329,16 @@ def clean_instructions(protocol_id):
 		out2 = {}
 		for x in output.keys():
 			lines = output[x]
+			l_copy = lines.copy()
 			lines_out = []
-			for line in lines:
+			for line in l_copy:
 				if line == ' \r\n':
 					lines.remove(line)
 				else:
+					if '●' in line:
+						line = line.replace('●','•')
+					elif '●' in line:
+						line = line.replace('●','•')
 					lines_out.append(line.replace('\r\n','\n'))
 			out2[x] = lines_out
 		
@@ -315,11 +425,10 @@ def clean_trtdf(protocol_id):
 	df.columns = df.columns.str.replace('conc_qty', 'Form.')
 	df.columns = df.columns.str.replace('lotcode', 'Lot\nCode')
 	df.columns = df.columns.str.replace('method','Method')
-	df.columns = df.columns.str.replace('placement', 'Placement')
+	df.columns = df.columns.str.replace('placement', 'Place\nment')
 	df.columns = df.columns.str.replace('timing', 'Timing')
 	df.columns = df.columns.str.replace('prod_description', 'Description')
-	df = df[['No.','Treatment Name', 'Description', 'Placement','Timing','Method','Form.', 'Form.\nUnit', 'Type', 'Rate','Rate\nUnit','Other\nRate','Other Rate\nUnit','Min #\nAppl','Code','Lot\nCode']]
-
+	df = df[['No.', 'trttag', 'seq_No.', 'Treatment Name', 'Description','Form.', 'Form.\nUnit', 'Type', 'Rate','Rate\nUnit','Other\nRate','Other Rate\nUnit','Place\nment','Timing','Method','Min #\nAppl','Code','Lot\nCode']]
 	remove = []
 	for column in df.columns:
 		blank = True
@@ -338,7 +447,10 @@ def clean_trtdf(protocol_id):
 		d[x[1][0]][0] += round(float(x[1][1]),2)
 		d[x[1][0]][1] = x[1][2]
 		d[x[1][0]][2] = x[1][3]
-	df = df.sort_values('No.').dropna(axis=1,how='all')
+	df['No.'] = df['No.'].astype(int)
+	df = df.sort_values(by=['No.', 'trttag', 'seq_No.'])
+	df = df.drop(columns=['seq_No.','trttag'])
+	df = df.dropna(axis=1,how='all')
 	"""Removing Trailing zeros without rounding"""
 	df['Rate'] = df['Rate'].str.replace('.0$','')
 	df['Form.'] = df['Form.'].str.replace('.0$','')
@@ -351,7 +463,7 @@ def printer(protocol_id):
 	print_doc(protocol_id, 'Arial', 12, True, False)
 
 
-def print_doc(protocol_id, font, font_size, confidential, color):
+def print_doc(protocol_id, shortname, font, font_size, confidential, color):
 	df, totals = clean_trtdf(protocol_id)
 	df2, df3, status_df = pd_overview(protocol_id)
 	if df2.empty == False:
@@ -371,14 +483,12 @@ def print_doc(protocol_id, font, font_size, confidential, color):
 		add_assessments(d, protocol_id, assessments, font, font_size, color)
 	if totals != {}:
 		add_totals(d, totals, font, font_size, confidential, color)
-		d.add_page_break()
 	if df.empty == False: 
-		add_trttable(d, protocol_id, df, font, font_size, color)
-	if overview != []:
-		d.save(overview['shortname'][0] + '.docx')
-	else:
-		d.save(protocol_id + '.docx')
-	print('Done formatting!!')
+		d.add_page_break()
+		add_trttable(d, protocol_id, df, font, font_size, color, confidential)
+	
+	d.save('C:\\inetpub\\wwwroot\\nematool\\static\\docs\\' + shortname + '.docx')
+	
 
 
 def print_doc2(protocol_id, font, font_size, confidential, color):
@@ -462,11 +572,19 @@ def add_cover(document, protocol_id, d, confidential, font_type, font_size, stat
 	table1.rows[1].cells[1].text = final
 	table1.rows[1].cells[0].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
 	table1.rows[1].cells[1].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
-
-	status = status_df.iloc[0,0]
-	revision = status_df.iloc[0,1]
-	last_update = status_df.iloc[0,2].replace(re.findall(r'.\d{7}$', status_df.iloc[0,2])[0], '')
-	last_update_date = datetime.datetime.strptime(last_update, "%Y-%m-%dT%H:%M:%S").strftime("%b %w, %Y; %I:%M%p")
+	try:
+		status = status_df.iloc[0,0]
+	except:
+		status = 'N/A'
+	try:
+		revision = status_df.iloc[0,1]
+	except:
+		revision = 'N/A'
+	try:
+		last_update = status_df.iloc[0,2].replace(re.findall(r'.\d{7}$', status_df.iloc[0,2])[0], '')
+		last_update_date = datetime.datetime.strptime(last_update, "%Y-%m-%dT%H:%M:%S").strftime("%b %w, %Y; %I:%M%p")
+	except:
+		last_update_date = 'N/A'
 	table2 = document.add_table(rows=2,cols=3)
 	table2.style.name='Table Grid'
 	table2.alignment = WD_TABLE_ALIGNMENT.CENTER
@@ -503,19 +621,20 @@ def add_cover(document, protocol_id, d, confidential, font_type, font_size, stat
 	document.add_page_break()
 	header = document.sections[0].header.paragraphs[0]
 	run = header.add_run()
-	run.add_picture('.\\logo.jpg', width = Inches(1))
+	run.add_picture('.\\protocols\\logo.jpg', width = Inches(1))
 	footer = document.sections[0].footer.paragraphs[0]
 	footer.alignment = WD_ALIGN_PARAGRAPH.RIGHT
 	run2 = footer.add_run()
 	if confidential == True:
 		run2.text = d['shortname'][0]
 		run3 = footer.add_run()
-		run3.text = "  (Confidential)"
+		run3.text = "  For Internal Distribution (Confidential)"
 		run3.font.color.rgb = RGBColor(255,0,0)
 	else:
 		run2.text = d['shortname'][0]
 		run3 = footer.add_run()
-		run3.text = "  (Not-Confidential)"
+		run3.text = "  Suitable for External Distribution (Confidential)"
+		run3.font.color.rgb = RGBColor(255,0,0)
 	header.style = document.styles['Header']
 	footer.style = document.styles['Footer']
 	run.alignment = WD_ALIGN_PARAGRAPH.LEFT
@@ -577,7 +696,9 @@ def add_assessments(document, protocol_id, df, font_type, font_size, color):
 		    tcW.type = 'auto'
 
 
-def add_trttable(document, protocol_id, df, table_font, font_size, color):
+def add_trttable(document, protocol_id, df, table_font, font_size, color, confidential):
+	if confidential == False:
+		df = df.drop(columns = ['Description'])
 	title = document.add_paragraph()
 	title_run = title.add_run('Treatments')
 	title_run.font.bold = True
@@ -968,24 +1089,6 @@ def ConvertRtfToDocx(rootDir, file):
     doc.Close()
     word.Quit()
 	
-
-def converter():
-	# Configure API key authorization: Apikey
-	configuration = cloudmersive_convert_api_client.Configuration()
-	configuration.api_key['Apikey'] = 'd2acc06c-dcb3-4b2d-b3ca-8c3376f03fa5'
-	# Uncomment below to setup prefix (e.g. Bearer) for API key, if needed
-	# configuration.api_key_prefix['Apikey'] = 'Bearer'
-	# create an instance of the API class
-	api_instance = cloudmersive_convert_api_client.ConvertDocumentApi(cloudmersive_convert_api_client.ApiClient(configuration))
-	input_file = 'C:\\Users\\s1030345\\OneDrive - Syngenta\\Documents\\pnr.rtf' # file | Input file to perform the operation on.
-	try:
-		# Convert Rich Text Format RTF to DOCX Document
-		api_response = api_instance.convert_document_rtf_to_docx(input_file)
-		f = open('sample.docx','w')
-		f.write(api_response)
-	except ApiException as e:
-		print("Exception when calling ConvertDocumentApi->convert_document_rtf_to_docx: %s\n" % e)
-
 """
 treatments_trialdesign_treatedplotaream2 as plotarea, treatments_applicationlist_code as app_code, treatments_trialdesign_statisticaldesign_armdescription as stat_design, treatments_applicationlist_volumemin as app_minvolume, treatments_applicationlist_volumemax as app_maxvolume, treatments_applicationlist_volumeunit_code as app_unit, treatments_applicationlist_requiredmixsize as req_mixsize, treatments_applicationlist_percentageoverage as percentoverage, treatments_applicationlist_mixsizeunit_code as mixsize_unit, treatments_treatmentlist_productamounttotalqty as product_total, treatments_trialdesign_numberofreplicates as replicates 
 """
