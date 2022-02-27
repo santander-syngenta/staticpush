@@ -87,6 +87,10 @@ class Doc():
 	def status_df(self):
 		return self._status_df
 
+	@property
+	def comments(self):
+		return self._comments
+	
 
 	def pull_data_threaded(self):
 		p  = self.format['pid']
@@ -94,7 +98,8 @@ class Doc():
 		THREAD2 = threading.Thread(target = self.pull_assessments)
 		THREAD3 = threading.Thread(target = self.pull_treatments)
 		THREAD4 = threading.Thread(target = self.pull_overview)
-		threads = [THREAD1, THREAD2, THREAD3, THREAD4]
+		THREAD5 = threading.Thread(target = self.pull_additional)
+		threads = [THREAD1, THREAD2, THREAD3, THREAD4, THREAD5]
 		for x in threads:
 			x.start()
 		for x in threads:
@@ -197,10 +202,10 @@ class Doc():
 		df = df.applymap(str)
 
 		##Remove Trailing Zeros
-		df['no_subsamples'] = df['no_subsamples'].str.replace('.0$','')
-		df['sample_size'] = df['sample_size'].str.replace('.0$','')
-		df['collection_basis'] = df['collection_basis'].str.replace('.0$','')
-		df['reporting_basis'] = df['reporting_basis'].str.replace('.0$','')
+		df['no_subsamples'] = df['no_subsamples'].str.replace('.0$','', regex=False)
+		df['sample_size'] = df['sample_size'].str.replace('.0$','', regex=False)
+		df['collection_basis'] = df['collection_basis'].str.replace('.0$','', regex=False)
+		df['reporting_basis'] = df['reporting_basis'].str.replace('.0$','', regex=False)
 
 		df['sample_size'] = df['sample_size'].replace('nan', np.nan)
 		df['collection_basis'] = df['collection_basis'].replace('nan', np.nan)
@@ -293,11 +298,11 @@ class Doc():
 			df = df.dropna(axis=1,how='all')
 			"""Removing Trailing zeros without rounding"""
 			if 'Rate' in df.columns:
-				df['Rate'] = df['Rate'].str.replace('.0$','')
+				df['Rate'] = df['Rate'].str.replace('.0$','', regex=False)
 			if 'Form.' in df.columns:
-				df['Form.'] = df['Form.'].str.replace('.0$','')
+				df['Form.'] = df['Form.'].str.replace('.0$','', regex=False)
 			if 'Min #\nAppl' in df.columns:
-				df['Min #\nAppl'] = df['Min #\nAppl'].str.replace('.0$','')
+				df['Min #\nAppl'] = df['Min #\nAppl'].str.replace('.0$','', regex=False)
 
 			self._trt_df = df; self._total_df = d 
 
@@ -338,6 +343,20 @@ class Doc():
 
 		self._overview = output
 		self._status_df = status_df.fillna(' ')
+
+
+	def pull_additional(self):
+		p = self.format['pid'].upper()
+		df = pd.read_sql("SELECT treatments_treatmentlist_applcodedescription as description,treatments_treatmentlist_comment as comment, treatments_treatmentlist_treatmentnumber as no, treatments_treatmentlist_treatementseq as seq_no, treatments_treatmentlist_treatementtag as trttag, treatments_treatmentlist_treatmentname_code as trt_name FROM mio.public.mio212_trialprotocol_treatments WHERE protocol_id =  \'" + p + "\';", self.engine)
+		df = df.sort_values(by=['no', 'trttag', 'seq_no'])
+		df = df.drop(columns=['seq_no','trttag'])
+		df = df[['no','trt_name','description','comment']]
+		df.columns = df.columns.str.replace('no','No.')
+		df.columns = df.columns.str.replace('trt_name','Name')
+		df.columns = df.columns.str.replace('description','Description')
+		df.columns = df.columns.str.replace('comment','Comment')
+		df = df.dropna(axis = 0)
+		self._comments = df
 
 
 	def add_cover(self, document):
@@ -758,6 +777,87 @@ class Doc():
 		section.footer_distance = Inches(0.35)
 
 
+	def add_additional(self, document):
+		protocol_id = self.format['pid']
+		df = self.comments
+		table_font = self.format['font']
+		font_size = self.format['font_size']
+		color = self.format['color']
+		confidential = self.format['confidential']
+
+		title = document.add_paragraph()
+		title_run = title.add_run('Additional Info')
+		title_run.font.bold = True
+		title_run.font.size = Pt(font_size + 2)
+		title_run.font.underline = True
+		title.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.CENTER
+		cols = df.columns
+		table = document.add_table(rows=1,cols=len(cols))
+		table.allow_autofit = True
+		table.alignment = WD_TABLE_ALIGNMENT.CENTER
+		hdr_cells = table.rows[0].cells; y = 0
+		for x in cols:
+			hdr_cells[y].text = x
+			p = hdr_cells[y].paragraphs[0]
+			p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+			p.style = document.styles['table_header']
+			shading_elm_1 = parse_xml(r'<w:shd {} w:fill="5b6775"/>'.format(nsdecls('w')))
+			hdr_cells[y]._tc.get_or_add_tcPr().append(shading_elm_1)
+			y+=1
+		y = 0; current = 0; shaded = True
+		for x in df.iterrows():
+			border_row = False
+			row = x[1]
+			row_cells = table.add_row().cells
+			last = False
+			if y == len(df)-1:
+				last = True
+			for i in range(len(cols)): 
+				row_cells[i].text = str(row[i])
+				p = row_cells[i].paragraphs[0]
+				p.style = document.styles['table']
+				set_cell_border(row_cells[i],start={"sz": 1, "val": "single", "color": "#5b6775", "space": "0"},)
+				if i == 0:
+					if int(row[i]) > current:
+						current = int(row[i])
+						border_row = True
+						if shaded == False:
+							shaded = True
+						elif shaded == True:
+							shaded = False
+				elif i == len(cols)-1:
+					set_cell_border(row_cells[i],end={"sz": 1, "val": "single", "color": "#5b6775", "space": "0"})
+				if border_row == True:
+					set_cell_border(row_cells[i], top={"sz": 1, "val": "single", "color": "#5b6775", "space": "0"})
+				if shaded == True:
+					if color == True:
+						shading_elm_1 = parse_xml(r'<w:shd {} w:fill="b5d4ff"/>'.format(nsdecls('w')))
+					else:
+						shading_elm_1 = parse_xml(r'<w:shd {} w:fill="c9c9c9"/>'.format(nsdecls('w')))
+					row_cells[i]._tc.get_or_add_tcPr().append(shading_elm_1)
+				if last == True:
+					set_cell_border(row_cells[i],bottom={"sz": 1, "val": "single", "color": "#5b6775", "space": "0"})
+			y += 1
+		for column in table.columns:
+			for cell in column.cells:
+			    tc = cell._tc
+			    tcPr = tc.get_or_add_tcPr()
+			    tcW = tcPr.get_or_add_tcW()
+			    tcW.type = 'auto'
+		table.style.name='Table Grid'
+		section = document.sections[-1]
+		new_width, new_height = section.page_height, section.page_width 
+		section.orientation = WD_ORIENT.LANDSCAPE
+		section.page_width = new_width
+		section.page_height = new_height
+		section.left_margin = Inches(0.5)
+		section.right_margin = Inches(0.5)
+		section.top_margin = Inches(0.5)
+		section.bottom_margin = Inches(0.5)
+		section.header_distance = Inches(0.35)
+		section.footer_distance = Inches(0.35)
+
+
 	def printer(self):
 		"""
 		Prints to a Formatted Word Document & saves to disk.
@@ -779,6 +879,9 @@ class Doc():
 		if self.trt_df.empty == False:
 			document.add_page_break()
 			self.add_treatments(document)
+		if self.comments.empty == False:
+			document.add_page_break()
+			self.add_additional(document)
 
 		document.save('.\\Q\\' + self.format['shortname'] + '.docx')
 		#document.save('C:\\inetpub\\wwwroot\\nematool\\static\\docs\\' + self.format['shortname'] + '.docx')
